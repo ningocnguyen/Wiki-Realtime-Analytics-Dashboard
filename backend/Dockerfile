@@ -4,6 +4,7 @@ WORKDIR /app
 COPY backend/requirements.txt .
 RUN pip install -r requirements.txt
 COPY backend/ .
+COPY scripts/rebuild_live.py /app/scripts/rebuild_live.py
 RUN useradd -u 10001 -m app
 USER 10001
 EXPOSE 5050

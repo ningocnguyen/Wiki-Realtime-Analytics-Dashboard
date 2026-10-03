@@ -43,14 +43,31 @@ def recent(database, source, limit):
                occurred_at, ingested_at
         FROM events WHERE source = %s ORDER BY id DESC LIMIT %s
     """, (source, limit))
-    for row in rows:
-        row["occurred_at"] = row["occurred_at"].astimezone(timezone.utc).isoformat()
-        row["ingested_at"] = int(row["ingested_at"].timestamp() * 1000)
-    return rows
+    return [payload(row) for row in rows]
+
+
+def payload(row):
+    return {"id": row["id"], "event_id": row["event_id"], "source": row["source"],
+            "type": row.get("type", row.get("event_type")), "user_id": row["user_id"],
+            "value": row["value"], "props": row["props"],
+            "occurred_at": row["occurred_at"].astimezone(timezone.utc).isoformat(),
+            "ingested_at": int(row["ingested_at"].timestamp() * 1000)}
+
+
+def dims(database, source, name, minutes, limit):
+    return query(database, """
+        SELECT left(props->>%s, 128) AS value, count(*)::bigint AS count
+        FROM events WHERE source = %s
+          AND occurred_at >= date_trunc('minute', now()) - make_interval(mins => %s)
+          AND occurred_at <= now()
+          AND jsonb_typeof(props->%s) IN ('string', 'number', 'boolean')
+          AND props->>%s <> ''
+        GROUP BY 1 ORDER BY count DESC, value LIMIT %s
+    """, (name, source, minutes, name, name, limit))
 
 
 def summary(database):
-    # Unique counts are exact here. Step 4 will provide Redis HLL estimates.
+    # Exact fallback while Redis is unavailable or awaiting a rebuild.
     rows = query(database, """
         WITH bounds AS (
             SELECT date_trunc('minute', now()) AS minute,
@@ -86,4 +103,5 @@ def summary(database):
         source = row.pop("source")
         sources[source] = row
     return {"sources": sources, "ws_clients": None,
-            "server_time": int(datetime.now(timezone.utc).timestamp() * 1000)}
+            "server_time": int(datetime.now(timezone.utc).timestamp() * 1000),
+            "stats_backend": "postgres", "unique_users_approximate": False}

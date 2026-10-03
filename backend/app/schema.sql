@@ -25,3 +25,18 @@ CREATE TABLE IF NOT EXISTS event_rollup_minute (
     value_sum DOUBLE PRECISION NOT NULL DEFAULT 0,
     PRIMARY KEY (source, bucket, event_type)
 );
+
+CREATE INDEX IF NOT EXISTS events_occurred_at_idx ON events (occurred_at);
+
+CREATE TABLE IF NOT EXISTS live_cache_state (
+    name TEXT PRIMARY KEY,
+    generation TEXT,
+    dirty BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- A committed pending row detects a process crash between DB commit and Redis update.
+CREATE TABLE IF NOT EXISTS live_cache_pending (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS live_cache_pending_name_idx ON live_cache_pending (name);

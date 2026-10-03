@@ -34,6 +34,7 @@ class StorageTests(unittest.TestCase):
                 "TESTING": True,
                 "DATABASE_URL": make_dsn(TEST_DATABASE_URL, options=f"-c search_path={cls.schema}"),
                 "DB_POOL_MAX": 8,
+                "REDIS_URL": "",
             })
             cls.database = cls.app.extensions["database"]
         except Exception:
