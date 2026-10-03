@@ -40,5 +40,16 @@ services:
     ports: ["127.0.0.1:8080:80"]
     depends_on: [backend]
 
+  wikipedia:
+    build: ./connectors
+    environment:
+      WIKI_STREAM_URL: ${WIKI_STREAM_URL:-https://stream.wikimedia.org/v2/stream/recentchange}
+      WIKI_USER_AGENT: ${WIKI_USER_AGENT:-RealTimeAnalyticsDashboard/0.1 (learning project; Python aiohttp)}
+    volumes: ["wiki_state:/state"]
+    depends_on: [backend]
+    restart: unless-stopped
+    stop_grace_period: 15s
+
 volumes:
   pgdata:
+  wiki_state:
