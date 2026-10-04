@@ -1,0 +1,18 @@
+groups:
+  - name: realtime-analytics
+    rules:
+      - alert: RtaBackendReplicasMissing
+        expr: sum(up{job="rta-backend"}) < 2 or absent(up{job="rta-backend"})
+        for: 2m
+        annotations:
+          summary: Fewer than two analytics backends are scrapeable
+      - alert: RtaLiveCacheUpdateFailed
+        expr: sum(increase(rta_live_cache_errors_total[5m])) > 0
+        for: 1m
+        annotations:
+          summary: A committed batch could not update Redis; rebuild the live cache
+      - alert: RtaWebSocketFramesDropped
+        expr: sum(increase(rta_ws_dropped_frames_total[5m])) > 0
+        for: 1m
+        annotations:
+          summary: WebSocket queues have dropped frames; clients will resynchronize

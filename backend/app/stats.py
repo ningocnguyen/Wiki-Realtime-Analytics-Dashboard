@@ -46,6 +46,15 @@ def recent(database, source, limit):
     return [payload(row) for row in rows]
 
 
+def since(database, source, after_id, limit):
+    rows = query(database, """
+        SELECT id, event_id, source, event_type AS type, user_id, value, props,
+               occurred_at, ingested_at
+        FROM events WHERE source = %s AND id > %s ORDER BY id ASC LIMIT %s
+    """, (source, after_id, limit))
+    return [payload(row) for row in rows]
+
+
 def payload(row):
     return {"id": row["id"], "event_id": row["event_id"], "source": row["source"],
             "type": row.get("type", row.get("event_type")), "user_id": row["user_id"],

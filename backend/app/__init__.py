@@ -10,7 +10,7 @@ from flask import Flask, jsonify, request, send_file
 from psycopg2.pool import PoolError
 from redis.exceptions import RedisError
 from flask_sock import Sock
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST
 
 from . import stats
 from .db import Database
@@ -28,13 +28,18 @@ def create_app(overrides=None):
         DATABASE_URL=os.getenv(
             "DATABASE_URL", "postgresql://postgres:postgres@localhost:55432/analytics"
         ),
-        REDIS_URL=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+        REDIS_URL=os.getenv("REDIS_URL", "" if os.getenv("VERCEL") else "redis://localhost:6379/0"),
         DB_POOL_MIN=int(os.getenv("DB_POOL_MIN", "1")),
-        DB_POOL_MAX=int(os.getenv("DB_POOL_MAX", "10")),
+        DB_POOL_MAX=int(os.getenv("DB_POOL_MAX", "2" if os.getenv("VERCEL") else "10")),
         MAX_BATCH=1000,
         MAX_CONTENT_LENGTH=5 * 1024 * 1024,
         REDIS_NAMESPACE=os.getenv("REDIS_NAMESPACE", "rta"),
-        START_HUB=True,
+        START_HUB=not bool(os.getenv("VERCEL")),
+        WIKI_PULL=bool(os.getenv("VERCEL")),
+        WIKI_STREAM_URL=os.getenv("WIKI_STREAM_URL", "https://stream.wikimedia.org/v2/stream/recentchange"),
+        WIKI_USER_AGENT=os.getenv("WIKI_USER_AGENT", "RealTimeAnalyticsDashboard/0.1 (learning project; Python requests)"),
+        WIKI_RETENTION_HOURS=int(os.getenv("WIKI_RETENTION_HOURS", "48" if os.getenv("VERCEL") else "0")),
+        DIRECT_DATABASE_URL=os.getenv("DATABASE_URL_UNPOOLED"),
         WS_QUEUE_SIZE=256,
         HUB_INBOX_SIZE=10000,
         BROADCAST_WINDOW_MS=10,
@@ -208,9 +213,30 @@ def create_app(overrides=None):
     def summary():
         return jsonify(live_summary())
 
+    @app.get("/api/live")
+    def poll_live():
+        selected = selected_source()
+        after_id = integer_argument("after", 0, 0, 9223372036854775807)
+        events = stats.since(database, selected, after_id, 200)
+        return jsonify(events=events, cursor=events[-1]["id"] if events else after_id,
+                       summary=live_summary())
+
+    if app.config["WIKI_PULL"]:
+        from .wikipull import pull
+
+        @app.post("/api/ingest/wikipedia")
+        def pull_wikipedia():
+            seconds = integer_argument("seconds", 18, 1, 25)
+            try:
+                return jsonify(pull(app.config, database, seconds))
+            except Exception:
+                app.logger.exception("On-demand Wikipedia pull failed")
+                return jsonify(error="Wikipedia pull unavailable; retry shortly"), 503
+
     @app.get("/api/config")
     def config():
-        return jsonify(stage="realtime", dashboard_source="wikipedia", realtime="ws" if hub else "disabled", wiki_pull=False)
+        return jsonify(stage="realtime", dashboard_source="wikipedia",
+                       realtime="ws" if hub else "poll", wiki_pull=app.config["WIKI_PULL"])
 
     if hub:
         app.config["SOCK_SERVER_OPTIONS"] = {"ping_interval": app.config["WS_PING_SECONDS"]}
@@ -241,7 +267,7 @@ def create_app(overrides=None):
 
     @app.get("/metrics")
     def prometheus_metrics():
-        return generate_latest(metrics.registry), 200, {"Content-Type": CONTENT_TYPE_LATEST}
+        return metrics.render(), 200, {"Content-Type": CONTENT_TYPE_LATEST}
 
     @app.get("/healthz")
     def health():

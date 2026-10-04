@@ -6,7 +6,8 @@ RUN pip install -r requirements.txt
 COPY backend/ .
 COPY tracker/ tracker/
 COPY scripts/rebuild_live.py /app/scripts/rebuild_live.py
+COPY scripts/start-backend.sh /app/scripts/start-backend.sh
 RUN useradd -u 10001 -m app
 USER 10001
 EXPOSE 5050
-CMD ["gunicorn", "-c", "gunicorn.conf.py", "wsgi:app"]
+CMD ["sh", "scripts/start-backend.sh"]

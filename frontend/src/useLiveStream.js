@@ -9,17 +9,18 @@ export function useLiveStream() {
     approximate: false, backend: null, updatedAt: null });
 
   useEffect(() => {
-    let disposed = false, socket, reconnectTimer, refreshing = false, refreshAgain = false;
+    let disposed = false, socket, reconnectTimer, pullTimer, pollTimer;
+    let refreshing = false, refreshAgain = false, polling = false, pollCursor = 0;
     let attempts = 0, lastFrame = 0, lastSnapshot = 0, clockOffset = 0;
     let buffer = [], stats = null, delaySamples = [], live = false, mode = "ws";
     const controllers = new Set();
     const update = (fn) => { if (!disposed) setState(fn); };
-    async function get(path) {
+    async function get(path, options = {}, timeoutMs = 10000) {
       const controller = new AbortController();
       controllers.add(controller);
-      const timeout = setTimeout(() => controller.abort(), 10000);
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const response = await fetch(path, { signal: controller.signal });
+        const response = await fetch(path, { ...options, signal: controller.signal });
         if (!response.ok) throw new Error(`Request failed (${response.status})`);
         return await response.json();
       } finally {
@@ -47,6 +48,7 @@ export function useLiveStream() {
           get(`/api/events/recent?source=${SOURCE}&limit=${FEED_LIMIT}`),
         ]);
         lastSnapshot = Date.now();
+        pollCursor = Math.max(pollCursor, ...recent.map((item) => item.id), 0);
         update((previous) => ({ ...previous, ...summaryPatch(summary),
           series: buildSeries(series, summary.server_time),
           breakdown: Object.fromEntries(breakdown.map((r) => [r.event_type, Number(r.count)])),
@@ -61,6 +63,31 @@ export function useLiveStream() {
         refreshing = false;
         if (refreshAgain && !disposed) { refreshAgain = false; void refresh(); }
       }
+    }
+    async function pollLive() {
+      if (disposed || polling || !lastSnapshot || document.visibilityState !== "visible") return;
+      polling = true;
+      try {
+        const result = await get(`/api/live?source=${SOURCE}&after=${pollCursor}`);
+        pollCursor = Math.max(pollCursor, result.cursor);
+        update((previous) => ({ ...previous, ...summaryPatch(result.summary),
+          feed: mergeFeed(previous.feed, result.events), status: "polling", error: null }));
+      } catch {
+        update((previous) => ({ ...previous, status: "offline",
+          error: "Could not refresh dashboard data. Retrying automatically." }));
+      } finally { polling = false; }
+    }
+    async function pullWikipedia() {
+      if (disposed) return;
+      let delay = 1500;
+      if (document.visibilityState === "visible") {
+        try {
+          const result = await get("/api/ingest/wikipedia?seconds=18", { method: "POST" }, 35000);
+          if (result.status === "busy") delay = 5000;
+        } catch { delay = 5000; }
+        void refresh();
+      }
+      if (!disposed) pullTimer = setTimeout(pullWikipedia, delay);
     }
     function connect() {
       if (disposed || mode !== "ws") return;
@@ -106,7 +133,11 @@ export function useLiveStream() {
     void refresh();
     void get("/api/config").then((config) => {
       mode = config.realtime === "ws" ? "ws" : "poll";
-      connect();
+      if (mode === "ws") connect();
+      else {
+        pollTimer = setInterval(() => { void pollLive(); }, 2000);
+        if (config.wiki_pull) void pullWikipedia();
+      }
     }).catch(() => connect());
     const flushTimer = setInterval(() => {
       if (!buffer.length && !stats) return;
@@ -126,6 +157,8 @@ export function useLiveStream() {
     return () => {
       disposed = true;
       clearTimeout(reconnectTimer);
+      clearTimeout(pullTimer);
+      clearInterval(pollTimer);
       [flushTimer, refreshTimer, watchdog].forEach(clearInterval);
       document.removeEventListener("visibilitychange", visible);
       controllers.forEach((controller) => controller.abort());

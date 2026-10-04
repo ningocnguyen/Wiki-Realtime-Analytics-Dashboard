@@ -6,3 +6,4 @@ psycopg2-binary==2.9.*
 psycogreen==1.0.*
 redis==5.*
 prometheus-client==0.21.*
+requests==2.*

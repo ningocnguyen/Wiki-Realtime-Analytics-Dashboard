@@ -40,3 +40,10 @@ CREATE TABLE IF NOT EXISTS live_cache_pending (
     name TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS live_cache_pending_name_idx ON live_cache_pending (name);
+
+-- Cursor for short, on-demand Wikipedia pulls in serverless deployments.
+CREATE TABLE IF NOT EXISTS connector_state (
+    name TEXT PRIMARY KEY,
+    last_id TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

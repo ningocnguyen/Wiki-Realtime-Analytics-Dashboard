@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: analytics
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels: { app: backend }
+  template:
+    metadata:
+      labels: { app: backend }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "5050"
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: backend }
+      containers:
+        - name: backend
+          image: rta-backend:unpublished
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 5050 }
+          envFrom:
+            - configMapRef: { name: analytics-config }
+            - secretRef: { name: analytics-secrets }
+          env:
+            - { name: PROMETHEUS_MULTIPROC_DIR, value: /tmp/rta-prometheus }
+          volumeMounts:
+            - { name: prometheus-files, mountPath: /tmp/rta-prometheus }
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          lifecycle:
+            preStop:
+              exec: { command: ["sh", "-c", "sleep 5"] }
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+      volumes:
+        - name: prometheus-files
+          emptyDir: { medium: Memory, sizeLimit: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: analytics
+spec:
+  selector: { app: backend }
+  ports:
+    - { name: http, port: 5050, targetPort: http }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend
+  namespace: analytics
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: backend }
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 65 }
+    - type: Resource
+      resource:
+        name: memory
+        target: { type: Utilization, averageUtilization: 75 }
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - { type: Pods, value: 1, periodSeconds: 60 }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend
+  namespace: analytics
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: backend }

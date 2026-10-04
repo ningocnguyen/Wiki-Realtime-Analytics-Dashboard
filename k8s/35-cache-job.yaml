@@ -1,0 +1,27 @@
+# PostgreSQL remains authoritative; this job seeds Redis after first deployment or reset.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: live-cache-bootstrap
+  namespace: analytics
+spec:
+  backoffLimit: 10
+  activeDeadlineSeconds: 3600
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: rebuild
+          image: rta-backend:unpublished
+          imagePullPolicy: IfNotPresent
+          command: ["python", "scripts/rebuild_live.py", "--if-needed"]
+          envFrom:
+            - configMapRef: { name: analytics-config }
+            - secretRef: { name: analytics-secrets }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }

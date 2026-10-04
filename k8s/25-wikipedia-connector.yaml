@@ -1,0 +1,47 @@
+# One collector only. Recreate prevents two rollout versions from sharing the SSE checkpoint.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wikipedia-state
+  namespace: analytics
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 1Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wikipedia-connector
+  namespace: analytics
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: wikipedia-connector }
+  template:
+    metadata:
+      labels: { app: wikipedia-connector }
+    spec:
+      terminationGracePeriodSeconds: 20
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: wikipedia-connector
+          image: rta-wikipedia:unpublished
+          imagePullPolicy: IfNotPresent
+          args: ["--api", "http://backend:5050", "--checkpoint", "/state/wikipedia.json"]
+          env:
+            - name: WIKI_USER_AGENT
+              valueFrom:
+                configMapKeyRef: { name: analytics-config, key: WIKI_USER_AGENT }
+          volumeMounts:
+            - { name: checkpoint, mountPath: /state }
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+      volumes:
+        - name: checkpoint
+          persistentVolumeClaim: { claimName: wikipedia-state }

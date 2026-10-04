@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analytics-config
+  namespace: analytics
+data:
+  REDIS_URL: redis://redis:6379/0
+  REDIS_NAMESPACE: rta
+  PORT: "5050"
+  WEB_CONCURRENCY: "2"
+  DB_POOL_MIN: "1"
+  # 10 pods x 2 workers x 5 connections = at most 100 app connections.
+  DB_POOL_MAX: "5"
+  COLLECT_RATE_PER_MIN: "120"
+  COLLECT_ORIGINS: https://your-website.example
+  WIKI_USER_AGENT: RealTimeAnalyticsDashboard/0.1 (learning project; Python aiohttp)

@@ -29,10 +29,13 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/analytics
       REDIS_URL: redis://redis:6379/0
+      PROMETHEUS_MULTIPROC_DIR: /tmp/rta-prometheus
       COLLECT_ORIGINS: ${COLLECT_ORIGINS:-http://localhost:5173,http://localhost:8080,http://localhost:5050}
       COLLECT_RATE_PER_MIN: ${COLLECT_RATE_PER_MIN:-120}
       PORT: "5050"
     deploy: { replicas: 2 }
+    tmpfs:
+      - /tmp/rta-prometheus:mode=1777
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -51,6 +54,15 @@ services:
     depends_on: [backend]
     restart: unless-stopped
     stop_grace_period: 15s
+
+  prometheus:
+    image: prom/prometheus:v3.5.5
+    profiles: [observability]
+    ports: ["127.0.0.1:9090:9090"]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+    depends_on: [backend]
 
 volumes:
   pgdata:

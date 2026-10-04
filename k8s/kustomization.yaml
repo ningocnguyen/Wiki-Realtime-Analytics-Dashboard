@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - 00-namespace.yaml
+  - 01-config.yaml
+  - 10-postgres.yaml
+  - 11-redis.yaml
+  - 20-backend.yaml
+  - 25-wikipedia-connector.yaml
+  - 30-frontend.yaml
+  - 35-cache-job.yaml
+  - 40-ingress.yaml
+images:
+  # Replace these tags with an immutable release after publishing all three images.
+  - name: rta-backend
+    newName: ghcr.io/ningocnguyen/wiki-realtime-analytics-dashboard-backend
+    newTag: unpublished
+  - name: rta-frontend
+    newName: ghcr.io/ningocnguyen/wiki-realtime-analytics-dashboard-frontend
+    newTag: unpublished
+  - name: rta-wikipedia
+    newName: ghcr.io/ningocnguyen/wiki-realtime-analytics-dashboard-wikipedia
+    newTag: unpublished
