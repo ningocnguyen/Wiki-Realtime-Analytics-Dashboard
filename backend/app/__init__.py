@@ -3,9 +3,10 @@ import json
 import queue
 import time
 from collections import Counter
+from pathlib import Path
 
 import psycopg2
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 from psycopg2.pool import PoolError
 from redis.exceptions import RedisError
 from flask_sock import Sock
@@ -15,6 +16,7 @@ from . import stats
 from .db import Database
 from .ingest import ingest
 from .hub import Hub
+from .collector import BOT_MARKERS, MAX_BEACON_BYTES, MAX_BEACON_EVENTS, CollectLimiter, parse_beacon
 from .live import DIM_KEYS, LiveStore
 from .metrics import Metrics
 from .validation import SOURCES, ValidationError, source, validate
@@ -37,6 +39,10 @@ def create_app(overrides=None):
         HUB_INBOX_SIZE=10000,
         BROADCAST_WINDOW_MS=10,
         WS_PING_SECONDS=20,
+        COLLECT_ORIGINS=tuple(origin.strip() for origin in os.getenv(
+            "COLLECT_ORIGINS", "http://localhost:5173,http://localhost:8080,http://localhost:5050"
+        ).split(",") if origin.strip()),
+        COLLECT_RATE_PER_MIN=int(os.getenv("COLLECT_RATE_PER_MIN", "120")),
     )
     app.config.update(overrides or {})
     database = Database(app.config)
@@ -49,6 +55,8 @@ def create_app(overrides=None):
     metrics = Metrics()
     live = LiveStore(app.config) if app.config["REDIS_URL"] else None
     app.extensions.update(metrics=metrics, live=live)
+    limiter = CollectLimiter(live, app.config["REDIS_NAMESPACE"], app.config["COLLECT_RATE_PER_MIN"])
+    app.extensions["collect_limiter"] = limiter
 
     def cached(method, fallback, *args):
         if live:
@@ -103,6 +111,14 @@ def create_app(overrides=None):
     def selected_source():
         return source(request.args.get("source", "wikipedia"))
 
+    def accept_events(events):
+        started = time.perf_counter()
+        inserted = ingest(database, events, live, metrics)
+        metrics.ingest_seconds.observe(time.perf_counter() - started)
+        for src, count in Counter(event["source"] for event in inserted).items():
+            metrics.events.labels(source=src).inc(count)
+        return jsonify(accepted=len(inserted)), 202
+
     @app.post("/api/events")
     def post_events():
         body = request.get_json(silent=True)
@@ -113,12 +129,56 @@ def create_app(overrides=None):
             return too_large(None)
         # Validate the entire batch before starting a transaction.
         events = [validate(event) for event in raw]
-        started = time.perf_counter()
-        inserted = ingest(database, events, live, metrics)
-        metrics.ingest_seconds.observe(time.perf_counter() - started)
-        for src, count in Counter(event["source"] for event in inserted).items():
-            metrics.events.labels(source=src).inc(count)
-        return jsonify(accepted=len(inserted)), 202
+        return accept_events(events)
+
+    @app.after_request
+    def collect_cors(response):
+        if request.path == "/api/collect":
+            response.headers.add("Vary", "Origin")
+            response.headers["Cache-Control"] = "no-store"
+            origin = request.headers.get("Origin")
+            if origin in app.config["COLLECT_ORIGINS"]:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+                response.headers["Access-Control-Max-Age"] = "600"
+        return response
+
+    @app.route("/api/collect", methods=["POST", "OPTIONS"])
+    def collect():
+        if request.headers.get("Origin") not in app.config["COLLECT_ORIGINS"]:
+            return jsonify(error="origin not allowed"), 403
+        if request.method == "OPTIONS":
+            return "", 204
+        agent = request.headers.get("User-Agent", "").lower()
+        if not agent or any(marker in agent for marker in BOT_MARKERS):
+            return "", 204
+        if request.content_length is not None and request.content_length > MAX_BEACON_BYTES:
+            return jsonify(error="beacon exceeds 96 KiB"), 413
+        if request.mimetype not in ("text/plain", "application/json"):
+            return jsonify(error="beacon must use text/plain or application/json"), 415
+        address = request.headers.get("X-Real-IP") or request.remote_addr or "unknown"
+        if not limiter.allowed(address):
+            return jsonify(error="rate limited"), 429
+        data = request.get_data(cache=False)
+        if len(data) > MAX_BEACON_BYTES:
+            return jsonify(error="beacon exceeds 96 KiB"), 413
+        try:
+            events = parse_beacon(data)
+        except ValidationError as error:
+            if str(error) == f"max {MAX_BEACON_EVENTS} events per beacon":
+                return jsonify(error=str(error)), 413
+            raise
+        return accept_events(events)
+
+    tracker = next(path for path in (
+        Path(__file__).resolve().parents[2] / "tracker" / "rta.js",
+        Path(__file__).resolve().parents[1] / "tracker" / "rta.js",
+    ) if path.exists())
+
+    @app.get("/rta.js")
+    def tracker_script():
+        return send_file(tracker, mimetype="application/javascript", max_age=3600)
 
     @app.get("/api/sources")
     def sources():

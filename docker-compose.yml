@@ -29,6 +29,8 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/analytics
       REDIS_URL: redis://redis:6379/0
+      COLLECT_ORIGINS: ${COLLECT_ORIGINS:-http://localhost:5173,http://localhost:8080,http://localhost:5050}
+      COLLECT_RATE_PER_MIN: ${COLLECT_RATE_PER_MIN:-120}
       PORT: "5050"
     deploy: { replicas: 2 }
     depends_on:
