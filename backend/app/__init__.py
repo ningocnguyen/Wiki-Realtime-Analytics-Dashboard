@@ -247,7 +247,7 @@ def create_app(overrides=None):
             selected = source(request.args.get("source", "wikipedia"))
             client = hub.register(selected)
             try:
-                connection.send(json.dumps({"kind": "hello", "worker_id": hub.worker_id, **live_summary()}))
+                connection.send(json.dumps({"kind": "hello", "worker_id": hub.worker_id}))
                 metrics.frames.inc()
                 while not hub.stopping.is_set():
                     reason = client.take_resync()

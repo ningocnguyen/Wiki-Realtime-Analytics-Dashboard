@@ -101,11 +101,14 @@ export function useLiveStream() {
         try {
           const message = JSON.parse(event.data);
           lastFrame = Date.now();
-          if (message.kind === "hello" || message.kind === "stats") {
+          if (message.kind === "hello") {
+            live = true;
+            attempts = 0;
+            void refresh();
+          } else if (message.kind === "stats") {
             live = true;
             attempts = 0;
             stats = message;
-            if (message.kind === "hello") void refresh();
           } else if (message.kind === "events" && Array.isArray(message.events)) {
             const events = message.events.filter((item) => item.source === SOURCE);
             buffer = mergeFeed(buffer, events);
