@@ -112,6 +112,23 @@ class ServerlessTests(unittest.TestCase):
         finally:
             owner.close()
 
+    def test_public_serverless_ingest_requires_a_producer_token(self):
+        original_serverless = self.app.config["SERVERLESS"]
+        original_token = self.app.config["INGEST_TOKEN"]
+        event = {"source": "demo", "event_id": "serverless-auth", "type": "test", "user_id": "tester"}
+        try:
+            self.app.config["SERVERLESS"] = True
+            self.app.config["INGEST_TOKEN"] = ""
+            self.assertEqual(self.client.post("/api/events", json=event).status_code, 403)
+            self.app.config["INGEST_TOKEN"] = "test-secret"
+            self.assertEqual(self.client.post("/api/events", json=event).status_code, 401)
+            accepted = self.client.post("/api/events", json=event,
+                                        headers={"Authorization": "Bearer test-secret"})
+            self.assertEqual((accepted.status_code, accepted.json["accepted"]), (202, 1))
+        finally:
+            self.app.config["SERVERLESS"] = original_serverless
+            self.app.config["INGEST_TOKEN"] = original_token
+
     def test_retention_prunes_raw_rows_but_keeps_rollups(self):
         old = self.record("old")
         old["meta"]["dt"] = "2020-01-01T00:00:00Z"

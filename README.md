@@ -105,7 +105,7 @@ Results measured locally on October 6, 2026 with Docker Desktop, two backend con
 
 | Check | Observation |
 | --- | --- |
-| Backend and frontend tests | 46 Python tests and 4 frontend tests passed; frontend lint and build passed. |
+| Backend and frontend tests | 47 Python tests and 4 frontend tests passed; frontend lint and build passed. |
 | Query benchmark, 1 million generated rows, five warm 24-hour reads | Raw without index: 457.7 ms; raw with index: 480.8 ms; minute rollup: 0.27 ms mean server execution time. The index does not help a near-full-table scan. |
 | Ingest, 5,000 synthetic demo events | 5,000 accepted in 7.90 s, about 633 events/s. This is a short burst, not a sustained capacity result. |
 | WebSocket, 1 client × 100 events | 100/100 delivered; HTTP-start-to-frame latency p50 31.9 ms, p95 168.2 ms. |
@@ -132,7 +132,9 @@ The default image tag `unpublished` and host `analytics.example.invalid` are pla
 
 `vercel.json` builds the React app and serves Flask from `api/index.py`. In this mode Redis and WebSockets are optional: the dashboard polls `/api/live` every two seconds, and a visible tab asks the backend to pull Wikimedia SSE for short periods. PostgreSQL advisory locks ensure that concurrent tabs share one pull. Set both `DATABASE_URL` and a **direct, unpooled** `DATABASE_URL_UNPOOLED`; the latter holds the session lock. `WIKI_RETENTION_HOURS` defaults to 48 in Vercel mode and prunes old raw Wikipedia rows while keeping minute rollups. If using the website tracker, set `COLLECT_ORIGINS` to its HTTPS origin.
 
-The Vercel entrypoint has been exercised in PostgreSQL-only mode locally, but no Vercel project has been deployed or verified.
+To deploy, connect this GitHub repository to a Vercel project with the repository root as the project root. Attach a hosted PostgreSQL database, set `DATABASE_URL` to its pooled URL and `DATABASE_URL_UNPOOLED` to its direct URL in the project environment, then deploy. The repo pins Python 3.12 in `.python-version`; `vercel.json` builds `frontend/dist` and routes API requests to the Python function. Visit `/api/config` on the deployment to confirm `"realtime":"poll"` and `"wiki_pull":true`, then open the dashboard and check `/readyz` for PostgreSQL readiness. In Vercel mode, anonymous `POST /api/events` is disabled; set `INGEST_TOKEN` to enable trusted producers and send it as an `Authorization: Bearer` token. The website tracker continues to use its separately validated `/api/collect` route.
+
+The Vercel entrypoint has been exercised in PostgreSQL-only mode locally, but no Vercel project has been deployed or verified yet.
 
 ## Operational limits
 

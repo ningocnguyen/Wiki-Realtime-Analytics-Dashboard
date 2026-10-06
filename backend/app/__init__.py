@@ -1,5 +1,6 @@
 import os
 import json
+import hmac
 import queue
 import time
 from collections import Counter
@@ -40,6 +41,8 @@ def create_app(overrides=None):
         WIKI_USER_AGENT=os.getenv("WIKI_USER_AGENT", "RealTimeAnalyticsDashboard/0.1 (learning project; Python requests)"),
         WIKI_RETENTION_HOURS=int(os.getenv("WIKI_RETENTION_HOURS", "48" if os.getenv("VERCEL") else "0")),
         DIRECT_DATABASE_URL=os.getenv("DATABASE_URL_UNPOOLED"),
+        SERVERLESS=bool(os.getenv("VERCEL")),
+        INGEST_TOKEN=os.getenv("INGEST_TOKEN", ""),
         WS_QUEUE_SIZE=256,
         HUB_INBOX_SIZE=10000,
         BROADCAST_WINDOW_MS=10,
@@ -126,6 +129,12 @@ def create_app(overrides=None):
 
     @app.post("/api/events")
     def post_events():
+        token = app.config["INGEST_TOKEN"]
+        if token:
+            if not hmac.compare_digest(request.headers.get("Authorization", ""), f"Bearer {token}"):
+                return jsonify(error="trusted producer token required"), 401
+        elif app.config["SERVERLESS"]:
+            return jsonify(error="trusted producer ingestion is disabled; configure INGEST_TOKEN"), 403
         body = request.get_json(silent=True)
         raw = body.get("events") if isinstance(body, dict) and "events" in body else [body]
         if not isinstance(raw, list) or not raw:

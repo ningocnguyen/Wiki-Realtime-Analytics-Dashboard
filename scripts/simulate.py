@@ -2,6 +2,7 @@
 import argparse
 import asyncio
 import json
+import os
 import random
 import time
 import uuid
@@ -25,13 +26,16 @@ async def run(args):
     started = time.monotonic()
     accepted = 0
     timeout = aiohttp.ClientTimeout(total=15)
+    token = os.getenv("INGEST_TOKEN")
+    headers = {"Authorization": f"Bearer {token}"} if token else None
     async with aiohttp.ClientSession(timeout=timeout) as session:
         for offset in range(0, args.total, args.batch):
             count = min(args.batch, args.total - offset)
             due = started + offset / args.rate
             await asyncio.sleep(max(0, due - time.monotonic()))
             events = [event(run_id, offset + index, args.users) for index in range(count)]
-            async with session.post(args.url.rstrip("/") + "/api/events", json={"events": events}) as response:
+            async with session.post(args.url.rstrip("/") + "/api/events", json={"events": events},
+                                    headers=headers) as response:
                 body = await response.json()
                 if response.status != 202 or body.get("accepted") != count:
                     raise RuntimeError(f"batch at {offset} failed: HTTP {response.status}, {body}")

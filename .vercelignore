@@ -1,0 +1,11 @@
+.run
+.venv
+.env*
+**/node_modules
+**/__pycache__
+**/*.pyc
+tests
+k8s
+observability
+scripts
+connectors/fixtures
